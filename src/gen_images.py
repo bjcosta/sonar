@@ -56,7 +56,7 @@ def GenDepthImage(sonar_data, chan_id, regen_cache=False):
 
 
 def Main():
-	regen_cache = True
+	regen_cache = False
 	file_names = GetFileNames()
 
 	logger.info('Starting dask client')

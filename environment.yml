@@ -1,0 +1,47 @@
+name: sonar
+channels:
+ - conda-forge
+ - pyviz
+
+dependencies:
+ - pyviz
+ - bokeh
+ - cartopy
+ - colorcet
+ - graphviz
+ - python-graphviz
+ - dask
+ - datashader
+ - distributed
+ - fastparquet
+ - firefox
+ - geckodriver
+ - pyarrow
+ - geoviews
+ - holoviews
+ - ipython
+ - jupyter
+ - matplotlib
+ - nest-asyncio
+ - networkx>=2.0
+ - netCDF4
+ - numba
+ - numpy
+ - overpy
+ - pandas
+ - param
+ - phantomjs
+ - pillow
+ - pscript
+ - python-snappy
+ - python
+ - rasterio
+ - requests
+ - selenium
+ - scikit-image
+ - scipy
+ - shapely
+ - snappy
+ - statsmodels
+ - streamz
+ - xarray
