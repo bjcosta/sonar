@@ -13,6 +13,7 @@ import glob
 import sonar.sl2_parser
 import sonar.map
 import sonar.normalized_depth
+import sonar.all
 
 # Configure the default renderer
 holoviews.extension('bokeh')
@@ -55,6 +56,18 @@ def GenDepthImage(sonar_data, chan_id, regen_cache=False):
 		logger.exception('Failed to produce depth images for: %s', sonar_data.attrs['file_name'])
 
 
+def GenDebugAll(sonar_data, chan_id):
+	try:
+		plots = sonar.all.GenAll(sonar_data, chan_id)
+		
+		chan_name = sonar.sl2_parser.ChannelToStr(chan_id)
+		for k,plot in plots.items():
+			file_name = sonar_data.attrs['file_name'] + '.' + str(chan_name) + '.' + k + '.png'
+			logger.info('Saving image: %s', file_name)
+			holoviews.save(plot, file_name)
+	except:
+		logger.exception('Failed to produce depth images for: %s', sonar_data.attrs['file_name'])
+
 def Main():
 	regen_cache = False
 	file_names = GetFileNames()
@@ -67,6 +80,7 @@ def Main():
 			GenMapImage(sonar_data)
 			for chan_id in sonar_data.channel.values:
 				GenDepthImage(sonar_data, chan_id, regen_cache=regen_cache)
+				GenDebugAll(sonar_data, chan_id)
 		except:
 			logger.exception('Failed to load file: %s', file_name)
 			continue

@@ -1,0 +1,38 @@
+Processing todo:
+* Normalize data over time not over samples
+* Normalize data spatially not just over time
+* Identify bottom types
+* Identify changes in temperature
+* Identify significant changes in depth
+* Identify what look like fish in the log
+* Identify what looks like logs, or garbage or other things
+* Create some kind of summary map/data that marks key places for fishing
+
+
+Reverse engineering sl2 protocol TODO:
+This is secondary to me as the current data is sufficient for things I want to do at the moment (unless I can get an accurate time from the GPS unit and access to IMU sensors would also be nice but dont look like they are available)
+
+It seems to me that the current known fields looks ok, but the flags are incorrect.
+Additionally there is data available in unknown fields we could probably work out
+Also I am seeing differences in the data I collect from my sonar and from the small.sl2 file downloaded from elsewhere. Would be useful to know how that file was generated
+Really want to collect data from different sonar units, also try diff settings on mine and tes
+
+* Log min/mean/max for each item per channel for those items that seem to be fixed values (maybe in hex also)
+* Need to define way to compare between different sl2 files
+* Add support for plotting sl2 in data sequence not separate channels only
+* Add support for plotting sl2 in time (or sl2_index) sequence not separate channels only
+* Start documenting relationships we see between unknowns
+* Create code that logs warnings when assumptions are not met:
+	For example unknown6 looks like a % 0 - 100, but is a 32 bit uint seems weird except maybe it is more complex field with 8 bit uint in bottom?
+* Document flags that appear the to match, add code to compare similarity %
+* In particular these have values non-zero:
+	unknown3
+	unknown6
+	unknown8
+	unknown9
+	unknown10
+	unknown11
+	unknown14
+	unknown5
+* Flag correlation with data changes (trial each combination of settings we consider)
+
