@@ -36,7 +36,7 @@ def NormalizeChannelNoCache(data, chan_id):
 		if (time % 1000) == 0:
 			total = len(channel.time)
 			perc = 100.0 * time / total
-			logger.info('%s : %s of %s', perc, time, total)
+			logger.info('%.1f : %s of %s', perc, time, total)
 
 		unadjusted_depth_per_bin = (unadjusted_max - unadjusted_min) / bin_count
 

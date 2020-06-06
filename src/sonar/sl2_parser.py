@@ -1,10 +1,14 @@
-
 # See info about the sl2 file format at:
 # * https://wiki.openstreetmap.org/wiki/SL2
 # * https://github.com/kmpm/node-sl2format/blob/master/doc/sl2fileformat.md
 # * https://www.geotech1.com/forums/showthread.php?11159-Lowrance-MCC-saved-data-structure
 # * https://github.com/Chris78/sl2decode/blob/master/sl2decode.rb
 # * https://github.com/Chris78/sl2decode
+#
+# Note: I think all info that appears public about the "flags" field is wrong.
+# None of the decoders make use of the flags and I saw little correlation between
+# the flags and changes in associated data. There are however some correlations
+# like when the GPS values change that appear to correlate with a few flags etc
 
 import os
 import os.path
@@ -18,6 +22,9 @@ import fastparquet
 import dask
 import dask.dataframe
 import xarray
+import json
+
+CACHE_VERSION = 2
 
 PARAQUET_ENGINE='pyarrow'
 #PARAQUET_ENGINE='fastparquet'
@@ -86,8 +93,34 @@ class NoneDecoder(object):
 	def GetUInt16BE(self): return None
 
 
+FORMAT_MAP = {
+	1: 'slg',
+	2: 'sl2',
+	3: 'sl3',
+}
+def FormatToStr(format):
+	if format not in FORMAT_MAP: 
+		return 'UNK(' + str(format) + ')'
+	return FORMAT_MAP[format]
+
+FAMILY_MAP = {
+	0: 'HDS 7',
+	1: 'Elite 4 CHIRP',
+}
+def FamilyToStr(family):
+	if family not in FAMILY_MAP: 
+		return 'UNK(' + str(family) + ')'
+	return FAMILY_MAP[family]
+
+
 class RawFileHeader(object):
 	def __repr__(self): return "{}({!r})".format(self.__class__.__name__, self.__dict__)
+	def __str__(self): return 'format:%s, family:%s, block_size:%s, reserved:%s' % (
+		FormatToStr(self.format),
+		FamilyToStr(self.family),
+		self.block_size,
+		self.reserved
+		)
 
 	def __init__(self, decoder=NoneDecoder()):
 		# 1 = slg
@@ -97,7 +130,7 @@ class RawFileHeader(object):
 
 		# 0 = HDS 7 etc...
 		# 1 = Elite 4 CHIRP etc...
-		self.version = decoder.GetUInt16()
+		self.family = decoder.GetUInt16()
 
 		# 1970=Downscan #b207
 		# 3200=Sidescan #800c
@@ -105,6 +138,8 @@ class RawFileHeader(object):
 		
 		# always 0
 		self.reserved = decoder.GetUInt16()
+		if self.reserved != 0:
+			logger.warning('Strange SL2 file: %s, reserved in header was non-zero: %s', '', self.reserved)
 
 FREQUENCY_MAP = {
 	0 : '200 KHz',
@@ -126,13 +161,15 @@ def FrequencyToStr(freq):
 		return 'Unknown SL2 frequency value %s assume 200 KHz' % (freq)
 	return FREQUENCY_MAP[freq]
 
+# Included both forward/reverse because still trying to figure out
+# what the flags mean. The public docs I saw didnt seem to match up
+# with my sl2 files.
 FLAGS_MAP_FORWARD = {
-	# all other values are unknown.
 	# @todo need to verify the bits with LE reading
 	'course_over_ground_valid' : 1 << 15,
 	'speed_water_valid' : 1 << 14,
 	'flag_unknown01' : 1 << 13,
-	'position_valid' : 1 << 12, # @todo GPS?
+	'position_valid' : 1 << 12,
 	'flag_unknown02' : 1 << 11,
 	'temperature_valid' : 1 << 10,
 	'speed_gps_valid' : 1 << 9,
@@ -153,7 +190,7 @@ FLAGS_MAP_REVERSE = {
 	'course_over_ground_valid' : 1 << 0,
 	'speed_water_valid' : 1 << 1,
 	'flag_unknown01' : 1 << 2,
-	'position_valid' : 1 << 3, # @todo GPS?
+	'position_valid' : 1 << 3,
 	'flag_unknown02' : 1 << 4,
 	'temperature_valid' : 1 << 5,
 	'speed_gps_valid' : 1 << 6,
@@ -342,14 +379,50 @@ MINUTES_PER_HOUR = 60
 def KnotsToKmph(value): return (value / 1.94385) / 1000 * SECONDS_PER_MINUTE * MINUTES_PER_HOUR
 def RadiansToDegrees(rad): return rad * 180.0 / math.pi
 
+# Copied from datashader.utils, importing datashader is very slow so we duplicate this here
+# as we dont care about the rest of it
+def lnglat_to_meters(longitude, latitude):
+	"""
+	Projects the given (longitude, latitude) values into Web Mercator
+	coordinates (meters East of Greenwich and meters North of the Equator).
 
-#class ChannelType(enum.Enum):
-#	PRIMARY = 0
-#	SECONDARY = 1
-#	DOWNSCAN = 2
-#	LEFT_SIDESCAN = 3
-#	RIGHT_SIDESCAN = 4
-#	COMPOSITE_SIDESCAN = 5
+	Longitude and latitude can be provided as scalars, Pandas columns,
+	or Numpy arrays, and will be returned in the same form.  Lists
+	or tuples will be converted to Numpy arrays.
+
+	Examples:
+	   easting, northing = lnglat_to_meters(-40.71,74)
+
+	   easting, northing = lnglat_to_meters(np.array([-74]),np.array([40.71]))
+
+	   df=pandas.DataFrame(dict(longitude=np.array([-74]),latitude=np.array([40.71])))
+	   df.loc[:, 'longitude'], df.loc[:, 'latitude'] = lnglat_to_meters(df.longitude,df.latitude)
+	"""
+	if isinstance(longitude, (list, tuple)):
+		longitude = numpy.array(longitude)
+	if isinstance(latitude, (list, tuple)):
+		latitude = numpy.array(latitude)
+
+	origin_shift = numpy.pi * 6378137
+	easting = longitude * origin_shift / 180.0
+	northing = numpy.log(numpy.tan((90 + latitude) * numpy.pi / 360.0)) * origin_shift / numpy.pi
+	return (easting, northing)
+
+
+# Implemented just doing reverse of lnglat_to_meters
+def meters_to_lnglat(easting, northing):
+	if isinstance(easting, (list, tuple)):
+		easting = numpy.array(easting)
+	if isinstance(northing, (list, tuple)):
+		northing = numpy.array(northing)
+
+	origin_shift = numpy.pi * 6378137
+	longitude = easting / origin_shift * 180.0
+	latitude = (numpy.arctan(numpy.exp(northing / origin_shift * numpy.pi)) / numpy.pi * 360.0) - 90.0
+	
+	return (longitude, latitude)
+
+
 
 PRIMARY = 0
 SECONDARY = 1
@@ -402,7 +475,7 @@ def UniversalTransverseMercatorToWGS84EquatorialLatitude(polar_latitude, is_nort
 	equatorial_latitude = temp * (180/math.pi)
 	
 	# @todo Horrible hack, I need to understand this better so we can do the 
-	# correct thing not just copy from others
+	# correct thing not just copy from others something that only worked for the northern hemisphere
 	if equatorial_latitude == -90.0 and not is_northern_hemisphere:
 		return UniversalTransverseMercatorToWGS84EquatorialLatitude(polar_latitude, True)
 	return equatorial_latitude
@@ -436,10 +509,11 @@ class ChannelData(object):
 
 
 class DataFrameLoader(object):
-	def __init__(self, file_name, cache_name):
+	def __init__(self, file_name, cache_name, cache_meta):
 		self.file_name = file_name
 		self.cache_name = cache_name
 		self.channel_data = {}
+		self.cache_meta = cache_meta
 		
 		self.flag_correlation = {}
 		self.last_d = None
@@ -555,6 +629,11 @@ class DataFrameLoader(object):
 	def OnProgress(self, percentage_complete):
 		self.LogCorrelation()
 	
+	def OnHeader(self, header):
+		self.cache_meta['format'] = FormatToStr(header.format)
+		self.cache_meta['family'] = FamilyToStr(header.family)
+		self.cache_meta['block_size'] = header.block_size
+
 	def OnBlock(self, block):
 		longitude = UniversalTransverseMercatorToWGS84EquatorialLongitude(block.lowrance_longitude)
 		latitude = UniversalTransverseMercatorToWGS84EquatorialLatitude(block.lowrance_latitude)
@@ -570,6 +649,13 @@ class DataFrameLoader(object):
 		# @todo would be nice to have real times (but not replace indexes)
 		data_index = self.channel_data[block.channel].next_index
 		self.channel_data[block.channel].next_index += 1
+
+		# Projects the given (longitude, latitude) values into Web Mercator
+		# coordinates (meters East of Greenwich and meters North of the Equator).
+		#
+		# This is the format used by most tools so better converting once here
+		# than in the multiple usages of it.
+		longitude, latitude = lnglat_to_meters(longitude, latitude)
 		
 		d = {
 			'channel': block.channel,
@@ -612,21 +698,21 @@ class DataFrameLoader(object):
 			if v & block.flags: d[k] = 1
 			else: d[k] = 0
 
+		# Used for debugging trying to reverse engineer flag meanings
 		self.UpdateFlagCorrelations(d)
 
-		#logger.info('Converted longitude: (sl2 %s to WGS84 %s) latitude: (sl2 %s to WGS84 %s)', block.lowrance_longitude, d['longitude'], block.lowrance_latitude, d['latitude'])
 		sonar_data = numpy.array(block.sonar_data, dtype=numpy.uint8)
 		ds = xarray.Dataset({
 				'sl2_index': (['channel', 'time'],  numpy.array([[ d['index'] ]])),
 				'depth': (['channel', 'time'],  numpy.array([[ d['water_depth'] ]]), {'units': 'meters'}),
-				'longitude': (['channel', 'time'],  numpy.array([[ d['longitude'] ]]), {'units': 'degrees', 'coordinate system': 'WGS84'}),
-				'latitude': (['channel', 'time'],  numpy.array([[ d['latitude'] ]]), {'units': 'degrees', 'coordinate system': 'WGS84'}),
+				'longitude': (['channel', 'time'],  numpy.array([[ d['longitude'] ]]), {'units': 'meters', 'coordinate system': 'Web Mercator'}),
+				'latitude': (['channel', 'time'],  numpy.array([[ d['latitude'] ]]), {'units': 'meters', 'coordinate system': 'Web Mercator'}),
 				'upper_limit': (['channel', 'time'],  numpy.array([[ d['upper_limit'] ]]), {'units': 'meters'}),
 				'lower_limit': (['channel', 'time'],  numpy.array([[ d['lower_limit'] ]]), {'units': 'meters'}),
 				'data': (['channel', 'time', 'depth_bin'],  [[ sonar_data ]], {'units': 'amplitude'}), # @todo Not sure exactly what units the sonar measures
 				
 				'unknown01': (['channel', 'time'],  numpy.array([[ d['unknown01'] ]])),
-				#'frequency': (['channel', 'time'],  numpy.array([[ d['frequency'] ]])),
+				'frequency': (['channel', 'time'],  numpy.array([[ d['frequency'] ]])),
 				'unknown02': (['channel', 'time'],  numpy.array([[ d['unknown02'] ]])),
 				'unknown03': (['channel', 'time'],  numpy.array([[ d['unknown03'] ]])),
 				'unknown04': (['channel', 'time'],  numpy.array([[ d['unknown04'] ]])),
@@ -686,35 +772,118 @@ class SL2Data(object):
 		self.channels = channels
 
 def LoadSonarFile(file_name, regen_cache=True):
+	'''Loads a specified lowrance sl2 sonar log file and produces a NetCDF cache file for it to speed up loading in future requests'''
+	
 	logger.info('Loading sonar file: %s', file_name)
 	# Load the pre-cached NetCDF files if they exist
 	dir_name, base_name = os.path.split(file_name)
-	cache_name = os.path.join(dir_name, 'cache', base_name)
+	gen_name = os.path.join(dir_name, 'gen')
+	cache_name = os.path.join(gen_name, 'cache', base_name)
+	
+	cache_meta_name = cache_name + '.cache.meta.json'
+	try:
+		with open(cache_meta_name) as json_file:
+			cache_meta = json.load(json_file)
+	except:
+		cache_meta = {}
 	
 	dirty_file_name = cache_name + '.cache.dirty'
 	dirty = os.path.isfile(dirty_file_name)
 	files = glob.glob(glob.escape(cache_name) + '.cache.*.nc')
-	if regen_cache or dirty or len(files) == 0:
+	
+	if regen_cache: 
+		logger.info('Regenerating the SL2 file cache as requested')
 
+	elif dirty: 
+		logger.info('Regenerating the SL2 file cache as the existing cache is incomplete and was cancelled during a previous file load request')
+		regen_cache = True
+
+	elif len(files) == 0: 
+		logger.info('Loading the SL2 file from scratch and generating a cache as there is no existing cache files that speed up reload')
+		regen_cache = True
+
+	elif cache_meta.get('cache_version') != CACHE_VERSION: 
+		logger.info('Regenerating the SL2 file cache as the existing cache is old and the format has since changed')
+		regen_cache = True
+	
+	# @todo Add checking of the file timestamp for files[0] compared to file_name
+	
+	else:
+		logger.info('The SL2 file cache is up to date, using faster cache load')
+
+	if regen_cache:
+		cache_meta = {}
+		
+		logger.info('Erasing old cache files')
+		for f in glob.glob(glob.escape(cache_name) + '*'): os.remove(f)
+
+		logger.info('Creating cache dirty marker file: %s', dirty_file_name)
 		if not os.path.isdir(os.path.dirname(dirty_file_name)):
 			os.makedirs(os.path.dirname(dirty_file_name))
-
 		import pathlib
 		pathlib.Path(dirty_file_name).touch()
 
-		logger.info('Generating NetCDF cache')
-		for f in files: os.remove(f)
-
 		# If not, then we will generate parquet files from the sl2 file
-		loader = DataFrameLoader(file_name, cache_name)
-		LoadRawLowranceLog(file_name, loader.OnBlock, on_progress=loader.OnProgress)
+		loader = DataFrameLoader(file_name, cache_name, cache_meta)
+		LoadRawLowranceLog(file_name, loader.OnBlock, on_progress=loader.OnProgress, on_header=loader.OnHeader)
 		loader.FinishSegment()
+		
+		cache_meta['cache_version'] = CACHE_VERSION
+		with open(cache_meta_name, 'w') as outfile:
+			json.dump(cache_meta, outfile)
+		
 		files = glob.glob(glob.escape(cache_name) + '.cache.*.nc')
 		os.remove(dirty_file_name)
 
 	data = xarray.open_mfdataset(files, combine='by_coords', parallel=True, engine='netcdf4')
+	
+	# Name of original file 
 	data.attrs['file_name'] = file_name
+	
+	# Add the cache meta-data
+	data.attrs['cache_meta_file_name'] = cache_meta_name
+	data.attrs['meta'] = cache_meta
+	
+	# Name prefix for any cache files generated from the original sl2 file
 	data.attrs['cache_name'] = cache_name
+	
+	# Name prefix used for any generated files like png,txt etc this is so we can ensure a consistent naming of outputs
+	# however is optional to use
+	data.attrs['gen_name'] = os.path.join(gen_name, base_name)
+	
+	
+	# Summarise data overall and per channel
+	info = []
+	for chan_id in [None] + [v for v in data.channel.values]:
+		if chan_id is None:
+			channel = data
+			channel_name = 'COMBINED'
+		else:
+			channel = data.sel(channel=chan_id)
+			channel_name = ChannelToStr(chan_id)
+
+		for k in channel.keys():
+			v = getattr(channel, k)
+			min = v.min().values.item()
+			mean = v.mean().values.item()
+			max = v.max().values.item()
+			range = max - min
+			info.append('SL2 Channel:%s Key:%s min:%s mean:%s max:%s range:%s' % (channel_name, k, min, mean, max, range))
+	
+	# Some key info (also above) that we want nicer info about
+	duration = data.timestamp.max().values.item() - data.timestamp.min().values.item()
+	duration_sec = duration / 1000
+	duration_min = duration_sec / 60
+	info += [
+		'SL2 Duration: %s minutes' % (duration_min),
+		'SL2 Unique Data Points: %s' % (len(data.time)),
+		'SL2 Channels: %s' % (','.join([ChannelToStr(v) for v in data.channel.values])),
+	]
+	with open(data.attrs['gen_name'] + '.txt', 'w') as f:
+		for i in info:
+			#logger.info('%s', i)
+			print (i, file=f)
+
 	return data
 
 

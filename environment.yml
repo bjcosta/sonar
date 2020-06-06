@@ -27,6 +27,7 @@ dependencies:
  - netCDF4
  - numba
  - numpy
+ - numpy-stl
  - overpy
  - pandas
  - param
