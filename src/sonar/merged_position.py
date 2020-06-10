@@ -29,6 +29,7 @@ import sonar.sl2_parser
 import scipy.interpolate
 import stl.mesh
 import matplotlib.pyplot
+import PIL
 
 import logging
 logger = logging.getLogger('merged_position')
@@ -350,7 +351,7 @@ def MergeSonarLogByPosition(sonar_data, position_data):
 
 	return MergePositionData(sorted_channel, position_data)
 
-def GenerateSurfaceMeshFromPositionData(position_data):
+def GenerateSurfaceMeshFromPositionData(position_data, include_corners=False):
 	if len(position_data.longitude) == 0:
 		logger.warning('No data to triangulate')
 		return None
@@ -360,15 +361,52 @@ def GenerateSurfaceMeshFromPositionData(position_data):
 	depth_range = [position_data.depth.min().values.item(), position_data.depth.max().values.item()]
 
 	offset = [longitude_range[0], latitude_range[0], 0]
-	# Scale z axis by 10 to make it more easily visible in the mesh for now
-	scale = [1, 1, 10]
-	tmp_xy = numpy.zeros((len(position_data.longitude), 2))
-	tmp_z = numpy.zeros(len(position_data.depth))
+	
+	# Scale z axis to make it more easily visible in the mesh for now
+	# We will choose scaling only INCREASE to make it at least 1/10 the x/y dists
+	min_xy_dist = min(longitude_range[1]-longitude_range[0], latitude_range[1]-latitude_range[0])
+	min_z_dist = min_xy_dist / 10
+	z_dist = depth_range[1] - depth_range[0]
+	z_scale = 1
+	if z_dist < min_z_dist:
+		z_scale  = min_z_dist / z_dist
+
+	scale = [1, 1, z_scale]
+	
+	extra_points = 0
+	if include_corners:
+		extra_points = 4
+	tmp_xy = numpy.zeros((len(position_data.longitude) + extra_points, 2))
+	tmp_z = numpy.zeros(len(position_data.depth) + extra_points)
 
 	for index in range(0, len(position_data.longitude)):
 		tmp_xy[index][0] = (position_data.longitude.values[index] - offset[0]) * scale[0]
 		tmp_xy[index][1] = (position_data.latitude.values[index] - offset[1]) * scale[1]
 		tmp_z[index] = -1 * (position_data.depth.values[index] - offset[2]) * scale[2]
+
+	if include_corners:
+		adjusted_longitude_range = (longitude_range[0] - offset[0]) * scale[0], (longitude_range[1] - offset[0]) * scale[0]
+		adjusted_latitude_range = (latitude_range[0] - offset[1]) * scale[1], (latitude_range[1] - offset[1]) * scale[1]
+		
+		# Bottom left
+		tmp_xy[-4][0] = adjusted_longitude_range[0]
+		tmp_xy[-4][1] = adjusted_latitude_range[0]
+		tmp_z[-4] = 0
+
+		# Top left
+		tmp_xy[-3][0] = adjusted_longitude_range[0]
+		tmp_xy[-3][1] = adjusted_latitude_range[1]
+		tmp_z[-3] = 0
+
+		# Bottom right
+		tmp_xy[-2][0] = adjusted_longitude_range[1]
+		tmp_xy[-2][1] = adjusted_latitude_range[0]
+		tmp_z[-2] = 0
+
+		# Top right
+		tmp_xy[-1][0] = adjusted_longitude_range[1]
+		tmp_xy[-1][1] = adjusted_latitude_range[1]
+		tmp_z[-1] = 0
 
 	surface_mesh = scipy.spatial.Delaunay(tmp_xy) #, incremental=True) #, qhull_options='QbB')
 	surface_mesh.scale = scale
@@ -396,6 +434,69 @@ def CreateStlFromSurfaceMesh(filename, surface_mesh):
 		stl_mesh.vectors[i][2] = [vertices_xy[f[2]][0] * surface_mesh.scale[0], vertices_xy[f[2]][1] * surface_mesh.scale[1], vertices_z[f[2]] * surface_mesh.scale[2]]
 	stl_mesh.save(filename)
 
+
+def CreateObjFromSurfaceMesh(file_name, surface_mesh):
+	# We will re-adjust the data to the correct scale, but not put the offset back in
+	# @todo We probably should adjust the offset a bit though so the middle of the map is at 0,0 maybe best? Or smallest at 0,0
+	# Right now that isnt the case
+	vertices_xy = surface_mesh.points
+	vertices_z = surface_mesh.z
+	faces = surface_mesh.simplices
+
+	x_range = (surface_mesh.longitude_range[0] - surface_mesh.offset[0]) * surface_mesh.scale[0], (surface_mesh.longitude_range[1] - surface_mesh.offset[0]) * surface_mesh.scale[0]
+	y_range = (surface_mesh.latitude_range[0] - surface_mesh.offset[1]) * surface_mesh.scale[1], (surface_mesh.latitude_range[1] - surface_mesh.offset[1]) * surface_mesh.scale[1]
+	
+	# The image generated has a 11 pixel border I cant remove so
+	# we will map the texture to exclude it. Load the image file and
+	# find the images dimensions used for remapping
+	texture_image_file_name = os.path.splitext(file_name)[0]+'.png'
+	image = PIL.Image.open(texture_image_file_name)
+	image_width,image_height = image.size
+	BORDER_SIZE = 11
+	
+	base_file_name, ext = os.path.splitext(os.path.basename(file_name))
+	with open(file_name, 'w') as file:
+		print ('mtllib '+str(base_file_name)+'.mtl', file=file)
+		print ('o ' + base_file_name + '.001', file=file)
+
+		for i in range(0, len(vertices_z)):
+			x = vertices_xy[i][0]
+			y = vertices_xy[i][1]
+			z = vertices_z[i]
+			print ('v %s %s %s' % (x, y, z), file=file)
+			
+			x_without_border_ratio = (x - x_range[0]) / (x_range[1] - x_range[0])
+			x_pixel = x_without_border_ratio * (image_width - (2 * BORDER_SIZE)) + 11
+			x_with_border_ratio = x_pixel / image_width
+			
+			y_without_border_ratio = (y - y_range[0]) / (y_range[1] - y_range[0])
+			y_pixel = y_without_border_ratio * (image_height - (2 * BORDER_SIZE)) + 11
+			y_with_border_ratio = y_pixel / image_height
+
+			u = x_with_border_ratio
+			v = y_with_border_ratio
+			print ('vt %s %s' % (u, v), file=file)
+
+		print ('usemtl ' + base_file_name + '.png', file=file)
+		print ('# Enable smooth shading', file=file)
+		print ('s 1', file=file)
+		
+		for i, f in enumerate(faces):
+			print ('f %s/%s %s/%s %s/%s' % (f[0]+1, f[0]+1, f[1]+1, f[1]+1, f[2]+1, f[2]+1), file=file)
+
+	with open(os.path.splitext(file_name)[0]+'.mtl', 'w') as file:
+		print ('# define a material named ' + base_file_name, file=file)
+		print ('newmtl ' + base_file_name + '.png', file=file)
+		print ('Ka 1.000 1.000 1.000     # white', file=file)
+		print ('Kd 1.000 1.000 1.000     # white', file=file)
+		print ('Ks 0.000 0.000 0.000     # black (off)', file=file)
+		print ('d 0.9                    # 0-1, 0 is fully transparent', file=file)
+		print ('illum 2', file=file)
+		print ('map_Ka '+str(base_file_name+'.png'), file=file)
+		print ('map_Kd '+str(base_file_name+'.png'), file=file)
+		print ('map_Ks '+str(base_file_name+'.png'), file=file)
+
+
 def GenerateDepthMapImageFromPositionData(position_data):
 	longitude_range = [position_data.longitude.min().values.item(), position_data.longitude.max().values.item()]
 	latitude_range = [position_data.latitude.min().values.item(), position_data.latitude.max().values.item()]
@@ -403,7 +504,9 @@ def GenerateDepthMapImageFromPositionData(position_data):
 	#import code
 	#code.interact(local=dict(globals(), **locals()))
 	
-	tiles = holoviews.Tiles('https://maps.wikimedia.org/osm-intl/{Z}/{X}/{Y}@2x.png', name="Wikipedia")
+	# For this which is a texture map for a 3D model we will use ESRI satellite images
+	tiles = holoviews.element.tiles.EsriImagery()
+	#tiles = holoviews.Tiles('https://maps.wikimedia.org/osm-intl/{Z}/{X}/{Y}@2x.png', name="Wikipedia")
 
 	longitude_dist = longitude_range[1] - longitude_range[0]
 	latitude_dist = latitude_range[1] - latitude_range[0]

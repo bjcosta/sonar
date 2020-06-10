@@ -44,7 +44,7 @@ def GenPositionFiles(file_base, position_data):
 	# @todo Add flat edge boundary to the position data. Will want to use Tiles() and get bounds
 
 	logger.info('Generating surface triangle mesh for: %s', file_base)
-	surface_mesh = sonar.merged_position.GenerateSurfaceMeshFromPositionData(position_data)
+	surface_mesh = sonar.merged_position.GenerateSurfaceMeshFromPositionData(position_data, include_corners=True)
 
 	# Create a depth map image
 	merged_position_image = sonar.merged_position.GenerateDepthMapImageFromPositionData(position_data)
@@ -56,6 +56,10 @@ def GenPositionFiles(file_base, position_data):
 	file_name = file_base + '.quantized_map.stl'
 	logger.info('Saving depth map STL: %s', file_name)
 	sonar.merged_position.CreateStlFromSurfaceMesh(file_name, surface_mesh)
+	
+	file_name = file_base + '.quantized_map.obj'
+	logger.info('Saving depth map OBJ: %s', file_name)
+	sonar.merged_position.CreateObjFromSurfaceMesh(file_name, surface_mesh)
 
 def GenMergedPositionImages(args, sonar_data, merged_data):
 	try:
