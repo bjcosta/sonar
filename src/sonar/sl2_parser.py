@@ -18,7 +18,6 @@ import math
 
 import numpy
 import pandas
-import fastparquet
 import dask
 import dask.dataframe
 import xarray
@@ -27,7 +26,6 @@ import json
 CACHE_VERSION = 2
 
 PARAQUET_ENGINE='pyarrow'
-#PARAQUET_ENGINE='fastparquet'
 
 # Max items in a single pandas.DataFrame, we split and use dask to handle them
 MAX_SEGMENT_SIZE = 10 * 1024
