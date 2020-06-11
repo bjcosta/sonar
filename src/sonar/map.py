@@ -43,7 +43,7 @@ def AdjustToIncludeNearestLandmark(lon_min, lon_max, lat_min, lat_max):
 	while node is None and radius <= max_radius:
 		logger.debug('Trying radius: %s', radius)
 		
-		query = '<query type="node"><has-kv k="place" v="suburb"/><around lon="%s" lat="%s" radius="%s"/></query><print/>' % (middle_lon_degrees, middle_lat_degrees, radius)
+		query = '<query type="node"><has-kv k="place" /><around lon="%s" lat="%s" radius="%s"/></query><print/>' % (middle_lon_degrees, middle_lat_degrees, radius)
 		logger.debug('Query: %s', query)
 		
 		try: result = api.query(query)
