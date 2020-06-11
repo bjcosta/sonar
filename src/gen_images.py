@@ -1,10 +1,12 @@
+#!/usr/bin/env python
+
 import sys
 import logging
 logger = logging.getLogger('gen_sonar_images')
 if __name__ == '__main__':
-	logging.basicConfig(stream=sys.stdout, level=logging.INFO, format='%(asctime)s : %(message)s')
+	logging.basicConfig(stream=sys.stdout, level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
-logger.info('Importing python modules (takes time for some reason)...')
+logger.info('Importing python modules (takes a long time with holoviews)...')
 import holoviews
 import dask
 import time
@@ -27,9 +29,9 @@ renderer = holoviews.renderer('bokeh').instance(mode='server')
 def GenMapImage(sonar_data):
 	try:
 		holoviews_map = sonar.map.GenMap(sonar_data)
-		# @todo Give it time to download tiles
-		logger.info('Sleeping or bokeh rendering tiles fails sometimes')
-		time.sleep(60)
+		
+		# @todo There is a bug somehow where the map tiles dont load in time and renders a white square
+		time.sleep(10)
 		map_file_name = sonar_data.attrs['gen_name'] + '.map.png'
 		logger.info('Saving map image: %s', map_file_name)
 		holoviews.save(holoviews_map, map_file_name)
@@ -41,9 +43,7 @@ def GenPositionFiles(file_base, position_data):
 	if not os.path.isdir(os.path.dirname(file_base)):
 		os.makedirs(os.path.dirname(file_base))
 
-	# @todo Add flat edge boundary to the position data. Will want to use Tiles() and get bounds
-
-	logger.info('Generating surface triangle mesh for: %s', file_base)
+	logger.debug('Generating surface triangle mesh for: %s', file_base)
 	surface_mesh = sonar.merged_position.GenerateSurfaceMeshFromPositionData(position_data, include_corners=True)
 
 	# Create a depth map image
@@ -53,12 +53,12 @@ def GenPositionFiles(file_base, position_data):
 	holoviews.save(merged_position_image, file_name)
 	
 	# Create a depth map STL
-	file_name = file_base + '.quantized_map.stl'
-	logger.info('Saving depth map STL: %s', file_name)
-	sonar.merged_position.CreateStlFromSurfaceMesh(file_name, surface_mesh)
+	#file_name = file_base + '.quantized_map.stl'
+	#logger.info('Saving depth map STL: %s', file_name)
+	#sonar.merged_position.CreateStlFromSurfaceMesh(file_name, surface_mesh)
 	
 	file_name = file_base + '.quantized_map.obj'
-	logger.info('Saving depth map OBJ: %s', file_name)
+	logger.info('Saving depth map 3D Waverfront OBJ: %s', file_name)
 	sonar.merged_position.CreateObjFromSurfaceMesh(file_name, surface_mesh)
 
 def GenMergedPositionImages(args, sonar_data, merged_data):
@@ -75,7 +75,7 @@ def GenDepthImage(sonar_data, chan_id, regen_cache=False):
 
 		chan_name = sonar.sl2_parser.ChannelToStr(chan_id)
 		depth_file_name = sonar_data.attrs['gen_name'] + '.' + str(chan_name) + '.sonar.png'
-		logger.info('Saving depth image: %s', depth_file_name)
+		logger.info('Saving sonar image: %s', depth_file_name)
 		holoviews.save(depth_image, depth_file_name)
 	except:
 		logger.exception('Failed to produce depth images for: %s', sonar_data.attrs['file_name'])
@@ -116,9 +116,11 @@ def ParseArgs():
 
 def Main():
 	args = ParseArgs()
-	logger.debug('Loading files: %s', args.files)
+	if len(args.files) > 1:
+		for f in args.files:
+			logger.info('Will load and merge file: %s', f)
 
-	logger.info('Starting dask client')
+	logger.info('Starting dask client (takes a long time also)...')
 	dask_client = dask.distributed.Client()
 	
 	if args.merge_file != '' and not args.truncate_merge_file and os.path.isfile(args.merge_file):
@@ -126,7 +128,7 @@ def Main():
 		merged_data = sonar.merged_position.LoadMergedData(args.merge_file)
 
 	else:
-		logger.info('Starting with empty merge data')
+		logger.debug('Starting with empty merge data')
 		if args.merge_file != '' and not args.truncate_merge_file:
 			logger.warning('Failed to load merge file: %s, we will create a new one', args.merge_file)
 		merged_data = sonar.merged_position.CreateEmptyMergedData()
@@ -162,8 +164,10 @@ def Main():
 	
 	if len(args.files) == 0 and args.merge_file != '':
 		GenPositionFiles(args.merge_file, merged_data)
-	logger.info('All completed successfully')
+	logger.debug('All completed successfully')
 	
+	# Change the log level as dask close has issues at the moment
+	logging.disable(logging.CRITICAL)
 	dask_client.close()
 	
 if __name__ == '__main__':

@@ -81,13 +81,21 @@ def AdjustToIncludeNearestLandmark(lon_min, lon_max, lat_min, lat_max):
 			node = result.nodes[min_dist_index]
 			node_lon, node_lat = sonar.sl2_parser.lnglat_to_meters(float(node.lon), float(node.lat))
 			
-			logger.debug('Selecting the nearest suburb: %s to include in graph with lat:%s lon:%s to the center of the travelled area lat:%s lon:%s with boundary: %s, %s, %s, %s', node.tags, node_lat, node_lon, middle_lat, middle_lon, lon_min, lat_min, lon_max, lat_max)
+			logger.debug('Selecting the nearest landmark: %s to include in graph with lat:%s lon:%s to the center of the travelled area lat:%s lon:%s with boundary: %s, %s, %s, %s', node.tags, node_lat, node_lon, middle_lat, middle_lon, lon_min, lat_min, lon_max, lat_max)
 			nearest_landmark_debug = str(node.tags['name'])
 	
 	logger.debug('Adjusting map edges using node: %s', node)
 	
 	if node is None:
-		logger.warning('Failed to locate the nearest landmark to (%s, %s) within radius: %s', middle_lon, middle_lat, radius)
+		logger.warning('Failed to locate the nearest landmark to (%s, %s) within radius: %s', middle_lon_degrees, middle_lat_degrees, radius)
+		# You can debug this using the overpass API : https://overpass-turbo.eu/#
+		# The query might look something like:
+		# [out:json][timeout:30];
+		# (
+		#  node(around:<radius>,<latitude>,<longitude>) ["place"];
+		# ); 
+		# out body;
+		
 	else:
 		# So lets first adjust bbox to fit in the new node
 		node_lat = float(node_lat)
@@ -129,7 +137,7 @@ def GenMap(sonar_data, include_nearest_landmark=True):
 		if nearest_landmark_debug != '':
 			nearest_landmark_debug = '. With nearest landmark: ' + nearest_landmark_debug
 
-	logger.info('Generating graph inside area: (%s, %s) - (%s, %s)%s', lon_min, lat_min, lon_max, lat_max, nearest_landmark_debug)
+	logger.debug('Generating graph inside area: (%s, %s) - (%s, %s)%s', lon_min, lat_min, lon_max, lat_max, nearest_landmark_debug)
 
 	tiles = holoviews.Tiles('https://maps.wikimedia.org/osm-intl/{Z}/{X}/{Y}@2x.png', name="Wikipedia")
 	tiles = tiles.opts(width=600, height=600)
@@ -148,7 +156,7 @@ def GenMap(sonar_data, include_nearest_landmark=True):
 		y=holoviews.Dimension('y', range=(bottom, top))
 		)
 	
-	logger.info('left:%s right:%s bottom:%s top:%s', left, right, bottom, top)
+	logger.debug('left:%s right:%s bottom:%s top:%s', left, right, bottom, top)
 	#import code
 	#code.interact(local=dict(globals(), **locals()))
 	

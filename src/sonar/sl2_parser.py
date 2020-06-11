@@ -583,7 +583,7 @@ class DataFrameLoader(object):
 			logger.info('Channel %s First block frequency: %s', d['channel'], d['frequency_str'])
 		
 		# Items we want to log whenever they change
-		for k in ['frequency_str']:
+		for k in []: #['frequency_str']:
 			old = self.GetLast(d['channel'])[k]
 			new = d[k]
 			if new != old:
@@ -809,7 +809,7 @@ def LoadSonarFile(file_name, regen_cache=True):
 	# @todo Add checking of the file timestamp for files[0] compared to file_name
 	
 	else:
-		logger.info('The SL2 file cache is up to date, using faster cache load')
+		logger.debug('The SL2 file cache is up to date, using faster cache load')
 
 	if regen_cache:
 		cache_meta = {}
