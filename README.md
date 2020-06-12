@@ -13,19 +13,26 @@ It supports the following features:
 
 ## Installation
 
-NOTE: Seems the environment.yml isn't working at the moment I will be looking into that soon and improving it to freeze versions of requirements
-
-Following are installation instructions for Linux (Similar instructions should work on other platforms too):
-* Install anaconda (Or use you package manager if conda is available)
-	* Go to https://www.anaconda.com and locate package to download
-	* wget https://repo.anaconda.com/archive/Anaconda3-2020.02-Linux-x86_64.sh
-	* bash Anaconda3-2020.02-Linux-x86_64.sh
-		* Yes to conda init (Adds to .bashrc)
-	* source ~/.bashrc
+Following are installation instructions:
+* Install anaconda (Or use you package manager if conda is available, but seems not in most distros)
+	* See official installation instructions: https://conda.io/projects/conda/en/latest/user-guide/install/index.html
+	* Linux Install : Run the following commands from the command line
+		* wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+		* bash Miniconda3-latest-Linux-x86_64.sh
+			* <enter> to review license
+			* <space> multiple times to scroll through license page at a time
+			* "yes" to accept license
+			* <enter> to accept default install location
+			* "yes" to run conda init
+		* source ~/.bashrc # Or you can relogin
+		* conda config --set auto_activate_base false
+	* Windows Install: Not yet
 * git clone https://github.com/bjcosta/sonar.git
 * cd sonar
 * conda env update --file environment.yml
 * conda activate sonar
+* NOTE: There is a bug in the current version of holoviews that causes .png files to be rendered as .html files instead. In the meantime to resolve this on linux we need to upgrade holoviews to a recent development version:
+	* conda install -c pyviz/label/dev holoviews
 
 
 ## Running
@@ -47,7 +54,7 @@ Assuming you followed the above instructions to install, you can now try and run
 
 File produced: data/gen/small.sl2.primary.sonar.png
 
-![](docs/small.sl2.primary.sonar.png)
+![small.sl2.primary.sonar.png](docs/small.sl2.primary.sonar.png)
 
 It will create a separate image for each "channel" in the sonar logs. This has been tested with a Lowrance unit that supports downscan imaging and basic sonar. Other formats may work but are untested.
 
@@ -63,15 +70,15 @@ The current known channels include:
 
 Another example from a log that contains both normal and downscan is shown below:
 
-![](docs/primary.sonar.png)
-![](docs/downscan.sonar.png)
+![primary.sonar.png](docs/primary.sonar.png)
+![downscan.sonar.png](docs/downscan.sonar.png)
 
 
 ### 2D Map Showing Travelled Path and Depth
 
 File produced: data/gen/small.sl2.map.png
 
-![](docs/small.sl2.map.png)
+![small.sl2.map.png](docs/small.sl2.map.png)
 
 You can see in this image that the map boundary was expanded to include the nearest landmark and not just showing water.
 
@@ -84,7 +91,7 @@ File produced: data/gen/small.sl2.quantized_map.mtl
 File produced: data/gen/small.sl2.quantized_map.obj
 File produced: data/gen/small.sl2.quantized_map.png
 
-![](docs/small.sl2.3d.png)
+![small.sl2.3d.png](docs/small.sl2.3d.png)
 
 These three files are produced to create a textured Wavefront OBJ 3D model (The small.sl2.quantized_map.obj file) showing the bottom depth contour as a 3D model with a satellite image + path traveled overlaid as the texture.
 
@@ -115,7 +122,7 @@ Textured 3D Depth Map or Merged Data:
 * merged_data/berkley.nc.quantized_map.obj
 * merged_data/berkley.nc.quantized_map.png
 
-![](docs/berkley_depth_3d.png)
+![berkley_depth_3d.png](docs/berkley_depth_3d.png)
 
 
 ## Known Issues
