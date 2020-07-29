@@ -126,11 +126,17 @@ Textured 3D Depth Map or Merged Data:
 
 
 ## Known Issues
-* It is currently VERY slow. A lot of work will need to be done on improving the performance, however I want to round out the features first
 * Depth map merging needs more work to identify/filter anomalous data
 * Depth map merging needs more work to improve merging data with different base water levels from tide/river height
 * Map tiles often fail to render due to timeouts
 * ... lots of other issues it is early stages yet ...
 * There is currently a bug I have looked into for Linux where it is generating a .html file instead of a png for the depth image
 
+
+## Future work
+There are a number of features I intend to get to over time though this is done in my spare time so we will see what I get to:
+* IN PROGRESS : Interactive mode
+* IN PROGRESS : Sonar artifact detection and classification (fish arches, bait balls, bottom type etc)
+* Support for other fish finder log formats
+* Create web service people can upload logs and use without knowing how to use python
 
