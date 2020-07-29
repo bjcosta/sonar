@@ -754,11 +754,12 @@ class LogData(object):
         #
         # The first is my own naming format used for local logs I collected on my sonar, 
         # the second is what lowrance uses on newer units or at least from Yens HDS Live 7
+        time_source_msg = ''
         if self.first_datetime is None:
             m = re.search(r'(?P<datetime>\d\d\d\d_\d\d_\d\d_\d\d_\d\d_\d\d[^\.]*)', self.file_name)
             if m:
                 self.first_datetime = datetime.datetime.strptime(m['datetime'], '%Y_%m_%d_%H_%M_%S%z')
-                logger.info('Using log start datetime parsed from custom filename: %s', self.first_datetime)
+                time_source_msg = 'parsing the source filename with datetime: %s' % (self.first_datetime)
 
         if self.first_datetime is None:
             m = re.search(r'(?P<datetime>\d\d\d\d-\d\d-\d\d_\d\d.\d\d.\d\d)(?P<timezone>[\+\-0-9]*)', self.file_name)
@@ -766,22 +767,22 @@ class LogData(object):
                 if m.group('timezone') != '':
                     self.first_datetime = datetime.datetime.strptime(m['datetime']+m['timezone'], '%Y-%m-%d_%H.%M.%S%z')
                 else:
-                    logger.warning('Assuming local time for generation of file: %s', self.file_name)
+                    logger.warning('Assuming local time for generation of file: %s (Please add timezone details to file name if possible)', self.file_name)
                     self.first_datetime = datetime.datetime.strptime(m['datetime'], '%Y-%m-%d_%H.%M.%S').replace(tzinfo=local_timezone)
-                logger.info('Using log start datetime parsed from lowrance filename: %s', self.first_datetime)
+                time_source_msg = 'parsing the lowrance filename with datetime: %s' % (self.first_datetime)
 
         if self.first_datetime is None:
             # This is low down in the priority as it doesnt seem to be correct
             # and is very different on all sorts of units
             if incoming_first_datetime32ms != numpy.iinfo(numpy.uint32).max:
-                logger.info('Decoded datetime is: %s', incoming_first_datetime64ns)
-                logger.info('Decoded time_offset is: %s', block.time_offset)
+                logger.debug('Decoded datetime from sonar log content is: %s (Not always reliable we may use file creation time instead)', incoming_first_datetime64ns)
+                logger.debug('Decoded time_offset from sonar log content is: %s (Not always reliable we may use file creation time instead)', block.time_offset)
                 
                 # Many of these just have very small values that are not correct (these sonars didnt exist in 1970)
                 # @todo Use a proper date to make it clear what the threshold is for now just hard code to something largish
                 if incoming_first_datetime32ms > 1000 * 60 * 60 * 24 * 365 * 10:
                     self.first_datetime = incoming_first_datetime64ns
-                    logger.info('Using log start datetime stored in the sonar log: %s', self.first_datetime)
+                    time_source_msg = 'first block entry in sonar log with value: %s' % (self.first_datetime)
 
 
         if self.first_datetime is None:
@@ -800,7 +801,7 @@ class LogData(object):
             mtime = os.path.getmtime(self.file_name)
             self.first_datetime = datetime.datetime.fromtimestamp(mtime, local_timezone)
             #self.first_datetime = self.first_datetime.replace(tzinfo=datetime.timezone.utc)
-            logger.info('Using log start datetime queried from file creation time: %s', self.first_datetime)
+            time_source_msg = 'OS file creation time with value: %s' % (self.first_datetime)
 
         epoch = datetime.datetime.utcfromtimestamp(0).replace(tzinfo=datetime.timezone.utc)
         self.first_datetime = numpy.uint64((self.first_datetime - epoch).total_seconds()) * numpy.uint64(1000000000)
@@ -808,9 +809,9 @@ class LogData(object):
     
         # Convert to a timedelta so we can easily add it to a datetime64[ns]
         self.first_datetime = self.first_datetime.astype('timedelta64[ns]')
-        local = datetime.datetime.fromtimestamp(float(self.first_datetime.astype('uint64') / numpy.uint64(1000000000)), local_timezone)
+        #local = datetime.datetime.fromtimestamp(float(self.first_datetime.astype('uint64') / numpy.uint64(1000000000)), local_timezone)
         utc = datetime.datetime.fromtimestamp(float(self.first_datetime.astype('uint64') / numpy.uint64(1000000000)), pytz.utc)
-        logger.info('Datetime used for anchor of offsets is: %s, UTC: %s, Local: %s', self.first_datetime, utc, local)
+        logger.info('Datetime used for log is: %s (UTC) obtained from %s', utc, time_source_msg)
 
         #import code
         #code.interact(local=dict(globals(), **locals()))
@@ -943,7 +944,7 @@ def LoadLowranceLog(file_name, cache_name, cache_meta):
             count += 1
             data = file.read(block_struct_size)
             if not data: 
-                logger.error('Block: %s Failed to read %s bytes from file', count, block_struct_size)
+                logger.debug('Block: %s Failed to read %s bytes from file', count, block_struct_size)
                 break
 
             new_percent_complete = int(100 * int(start_block) / file_size)
@@ -957,12 +958,10 @@ def LoadLowranceLog(file_name, cache_name, cache_meta):
             block = UnpackedToObject(block_parser[:-1], unpacked_block)
             if block.block_offset == 0:
                 if block.current_block_bytes == 0:
-                    # @todo I exited early in old impl, current one I see it isnt the end of file
-                    # Weirdness, but is corrupted I think.
-                    logger.info('Last block %s has offset/size of 0. Treating as EOF. Read: %s of %s', count, file.tell(), file_size)
+                    logger.debug('Last block %s has offset/size of 0. Treating as EOF. Read: %s of %s', count, file.tell(), file_size)
                     break
                 
-                logger.info('Skipping block: %s with zero offset and unpack: %s', count, block)
+                logger.warning('Skipping block: %s with zero offset: %s', count, block)
                 file.seek(start_block + block.current_block_bytes)
                 start_block += block.current_block_bytes
                 continue
@@ -986,7 +985,6 @@ def LoadLowranceLog(file_name, cache_name, cache_meta):
             file.seek(start_block + block.current_block_bytes)
             start_block += block.current_block_bytes
         log_data.FinishSegment()
-        logger.info('Finished parsing file')
 
 
 def LoadSonarFile(file_name, regen_cache=True):
@@ -1069,7 +1067,8 @@ def LoadSonarFile(file_name, regen_cache=True):
     data.attrs['gen_name'] = os.path.join(gen_name, base_name)
     
     if regen_cache:
-        logger.info('Summarize the per-channel data')
+        summary_file_name = data.attrs['gen_name'] + '.txt'
+        logger.info('Summarize the per-channel data into: %s', summary_file_name)
         # Summarise data overall and per channel
         info = []
         for chan_id in [None] + [v for v in data.channel.values]:
@@ -1106,7 +1105,7 @@ def LoadSonarFile(file_name, regen_cache=True):
             'Unique Data Points: %s' % (len(data.frame_index)),
             'Channels: %s' % (','.join([ChannelToStr(v) for v in data.channel.values])),
         ]
-        with open(data.attrs['gen_name'] + '.txt', 'w') as f:
+        with open(summary_file_name, 'w') as f:
             for i in info:
                 #logger.info('%s', i)
                 print (i, file=f)
